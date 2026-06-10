@@ -1,0 +1,6 @@
+# Dev/test-only dependencies (the Lambda itself needs nothing beyond boto3,
+# which the Lambda runtime already provides).
+pytest
+moto[dynamodb]
+boto3
+requests
