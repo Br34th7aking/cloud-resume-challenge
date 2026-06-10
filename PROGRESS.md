@@ -37,7 +37,7 @@ IaC, CI/CD) are written directly.
 - [x] **Monitoring/alerting**: CloudWatch alarms (`cloud-resume-lambda-errors`, `cloud-resume-api-5xx`) → SNS `cloud-resume-alarms` → **PagerDuty** (service "Cloud Resume API"). Tested: ALARM→incident, OK→auto-resolve. (Install PagerDuty mobile app to receive pages; SMS to +91 blocked by India DLT rules — app+email instead.)
 - [x] **PagerDuty → Slack** (2026-06-10): PagerDuty Slack extension connected to workspace `realsemedtech.slack.com`; connection "Cloud Resume API" → `#aws-alerts` (Responder, all events, any urgency). Tested end-to-end via `aws cloudwatch set-alarm-state` → incident card in Slack + threaded auto-resolve. Free on PagerDuty Free plan + free Slack.
 - [x] **IAM Access Analyzer** (2026-06-10): free external-access analyzer `realsem-external-access-analyzer` (ap-south-1, org zone of trust ≡ account — org has only this account). Policy validation: `aws accessanalyzer validate-policy` → both saved policies clean. Paid analyzers (internal/unused) deliberately skipped.
-- [ ] Git repo + push to personal GitHub
+- [x] Git repo + push to personal GitHub — public monorepo https://github.com/Br34th7aking/cloud-resume-challenge (git identity = noreply email)
 - [ ] **AWS Cloud Practitioner certification** *(your own study + exam)*
 
 ---
@@ -91,6 +91,7 @@ IaC, CI/CD) are written directly.
 - [x] Route **`POST /count`** (POST, not GET — increment mutates state; avoids cache/prefetch issues)
 - [x] CORS: Allow-Origin `*`, Allow-Headers `content-type`, Allow-Methods `POST`/`OPTIONS`
 - [x] Endpoint: `https://z8v6craitg.execute-api.ap-south-1.amazonaws.com/count` — tested `{"views": 2}`
+- [x] **Throttling** (2026-06-10): stage default route settings rate=5 rps, burst=10 — free, 429s excess at the gateway without invoking Lambda (denial-of-wallet guard); smoke tests pass under it; capture in step-12 IaC
 
 ### 11. Tests ✅
 - [x] `backend/tests/test_lambda_function.py` — 5 pytest tests with **moto** (fake DynamoDB in-process; no creds/cost): response contract (200 + CORS + JSON), increment correctness (41→42), persistence across calls (1→2→3), missing-item upsert (first-ever visit → 1), Decimal→int serialization guard
@@ -103,8 +104,8 @@ IaC, CI/CD) are written directly.
 - [ ] Define the back end (DynamoDB + Lambda + API GW) as code (AWS SAM or Terraform)
 - [ ] `deploy` from the template instead of console
 
-### 13. Source control — GitHub (back end)
-- [ ] Back-end repo, committed
+### 13. Source control — GitHub (back end) ✅
+- [x] Public **monorepo** (frontend + backend + docs): https://github.com/Br34th7aking/cloud-resume-challenge — initial commit `392fe79` (steps 1–11). CI in steps 14–15 will use path filters.
 
 ### 14. CI/CD — back end
 - [ ] GitHub Actions: run tests + deploy SAM/Terraform on push
@@ -153,4 +154,4 @@ New domain — build & deploy an ML feature. Detail later.
 
 ---
 
-*Last updated: 2026-06-10 — Steps 1–11 DONE. Session 3 added: IAM Access Analyzer (free external) + policy validation, PagerDuty→Slack (#aws-alerts, e2e tested), pytest suite for the Lambda (5 tests, moto). **NEXT: Step 12 — IaC (SAM or Terraform).** Then 13 GitHub, 14–15 CI/CD, 16 blog. See LEARNING.md for concepts (sessions 1–3).*
+*Last updated: 2026-06-10 (later) — Steps 1–11 + 13 DONE. Added: smoke tests (pytest -m smoke vs live stack), API throttling (5 rps/burst 10, free), public GitHub monorepo. **NEXT: Step 12 — IaC (Terraform vs SAM decision pending).** Then 14–15 CI/CD, 16 blog.*
