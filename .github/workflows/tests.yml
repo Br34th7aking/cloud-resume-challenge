@@ -1,0 +1,26 @@
+# Always-on unit tests. Deliberately NOT path-filtered: this is the required
+# status check on the ruleset, and a required check that doesn't run blocks
+# the merge forever — so it must run on every PR, even docs-only ones.
+
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements-dev.txt
+        working-directory: backend
+      - run: python -m pytest tests/ -v
+        working-directory: backend
