@@ -163,4 +163,4 @@ New domain — build & deploy an ML feature. Detail later.
 
 ---
 
-*Last updated: 2026-06-10 (evening) — Steps 1–15 DONE. Added: full CI/CD (OIDC, three workflows, required status checks; repo flow is now branch → PR → merge). **NEXT: Step 16 — blog post.** Deferred: CloudFront/S3/ACM/Cloudflare into Terraform.*
+*Last updated: 2026-06-10 (evening) — Steps 1–15 DONE; core challenge build complete. Step 16 (blog) ON HOLD by choice. Deferred/optional: CloudFront+S3+ACM+Cloudflare into Terraform (us-east-1 provider alias lesson) · Cloud Practitioner cert (self-study) · Phases 2–4 follow-on challenges.*

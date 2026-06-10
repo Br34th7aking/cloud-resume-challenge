@@ -10,9 +10,10 @@ A running record of concepts learned, with explanations in plain language.
   (S3 · CloudFront/OAC · ACM · Cloudflare DNS · IAM/CLI basics · budgets)
 - [Session 2 — 2026-06-09](#session-2--2026-06-09) — serverless visitor counter + alerting
   (DynamoDB · Lambda · API Gateway · CORS · CloudWatch→SNS→PagerDuty)
-- [Session 3 — 2026-06-10](#session-3--2026-06-10) — security audit, Slack alerts, tests, IaC
+- [Session 3 — 2026-06-10](#session-3--2026-06-10) — security audit, Slack alerts, tests, IaC, CI/CD
   (Access Analyzer · policy validation · PagerDuty→Slack · pytest/moto ·
-   smoke tests · throttling · Git/GitHub · Terraform · commit signing)
+   smoke tests · throttling · Git/GitHub · Terraform · commit signing ·
+   OIDC · GitHub Actions · PR flow)
 
 ### Concepts index (for review)
 
@@ -31,6 +32,7 @@ A running record of concepts learned, with explanations in plain language.
 | Git/GitHub: monorepo, secrets vs identifiers | S3 |
 | Terraform: state, plan/apply, drift, import, variables | S3 |
 | Commit signing: SSH keys, Verified badge, rulesets | S3 |
+| CI/CD: OIDC vs secrets, GitHub Actions, required checks, PR flow | S3 |
 
 ---
 
@@ -607,7 +609,85 @@ Concepts:
   Rulesets are the modern successor to classic branch protection; "status
   checks" are a different rule type (CI results — coming in step 14).
 
-### How code flows through the system (end of session 3)
+### Steps 14–15 — CI/CD (same session)
+
+#### OIDC (OpenID Connect) — auth without stored keys
+
+- **The problem with GitHub Secrets for cloud creds**: a stored AWS key is
+  long-lived, works from anywhere, needs manual rotation, and is exposed to
+  every workflow run (one malicious dependency can exfiltrate it).
+- **OIDC flow**: runner asks GitHub for a signed JWT (claims: repo, branch) →
+  presents it to `sts:AssumeRoleWithWebIdentity` → AWS verifies the signature
+  against GitHub's published public keys → issues ~1h temporary credentials.
+  **A secret you never store can't leak.**
+- **Scope of OIDC**: works with anything that can *verify* GitHub's tokens
+  (AWS/GCP/Azure, Vault, Cloudflare, PyPI/npm). Plain API keys
+  (Stripe, PagerDuty…) can't be OIDC'd — those still belong in Secrets.
+  Rule: OIDC for cloud auth; Secrets only for non-federatable keys.
+- **Two AWS resources** (`infra/github-oidc.tf`):
+  1. `aws_iam_openid_connect_provider` — registers GitHub as an identity
+     source (public-key trust; nothing secret; one per account).
+  2. `aws_iam_role` whose trust policy pins `aud = sts.amazonaws.com` AND
+     `sub = repo:Br34th7aking/cloud-resume-challenge:ref:refs/heads/main` —
+     forks, other repos, other branches all get AccessDenied.
+- **Scoping a Terraform-runner role** is the hard part (it touches IAM!).
+  Spectrum: AdministratorAccess (easy, risky) → PowerUser → hand-scoped
+  (ours). Two deliberate guards: CI can READ but not WRITE its own role
+  (no self-privilege-escalation; changes to CI's perms need a human +
+  laptop), and `iam:PassRole` is pinned to the exec role + lambda service
+  (else "create a Lambda" = "borrow any role in the account").
+- Reality check: hand-scoped policies are built iteratively against real
+  `AccessDenied`s; nobody writes them perfectly blind. (Ours passed first try
+  + clean Access Analyzer validation.)
+
+#### GitHub Actions anatomy
+
+- Hierarchy: **workflow** (.yml, has triggers) → **jobs** (each a FRESH
+  Ubuntu VM — nothing carries over; hence `pip install` twice, OIDC auth per
+  job) → **steps** (`uses:` = marketplace action, `run:` = shell).
+- `needs:` chains jobs — the pytest gate: deploy never starts on red tests.
+- `permissions: id-token: write` is the OIDC switch; `contents: read` for
+  checkout. Least privilege applies to the GitHub token too.
+- `concurrency:` group serializes deploys (two pushes ≠ two parallel applies).
+- **Path filters** in a monorepo (`paths: backend/**`) keep website edits
+  from running terraform — but see the required-check gotcha below.
+- Three workflows: `backend.yml` (test → terraform apply → live smoke),
+  `frontend.yml` (s3 sync --delete → invalidation → curl -f), `tests.yml`
+  (always-on `unit` job).
+- Cost: public repos get **unlimited free minutes**; the deploys themselves
+  are API calls + pennies of S3 PUTs; 1,000 free invalidation paths/mo.
+
+#### Required status checks + PR flow
+
+- Ruleset `require-signed-commits` now has three rules: `required_signatures`
+  + `pull_request` + `required_status_checks` (`unit` must be green).
+- Required checks gate the MERGE, so direct pushes to main are rejected
+  (the check can't have run yet) → **workflow is now branch → PR → unit
+  green → squash-merge**. Verified both directions: direct push rejected
+  (GH013), PR #1 merged after `unit` passed.
+- **Monorepo gotcha**: a required check that's path-filtered will simply
+  never report on a docs-only PR — and GitHub waits forever (merge blocked).
+  Hence `tests.yml` is deliberately NOT path-filtered: 40 free seconds per PR
+  beats a hung merge.
+- Squash-merge commits are created and signed by GitHub itself — satisfies
+  the signature rule by design.
+- Secrets in CI, the legit use: PagerDuty key (gitignored tfvars locally)
+  becomes GitHub secret `PAGERDUTY_ENDPOINT`, injected as
+  `TF_VAR_pagerduty_endpoint` env var — Terraform reads `TF_VAR_*`
+  automatically.
+
+#### CI gotchas
+
+- Pushing workflow files needs the gh token to have **`workflow` scope**
+  (anti-exfiltration guard) — device-flow refresh again; first attempt 401s,
+  retry works.
+- CI `s3 sync` re-uploads every file every time: change detection is
+  size+mtime and a fresh checkout resets mtimes. Fine at 3 files; use
+  content-hash tooling for big sites.
+- Marketplace actions churn (Node 20→24 deprecation warnings): platform
+  noise, not our bug — bump major versions when something actually breaks.
+
+### How code flows through the system (final — fully automated)
 
 ```
  MacBook (dev)
@@ -615,41 +695,48 @@ Concepts:
    edit code: website/ · backend/ · infra/
         │
         ▼
-   pytest  (unit: moto fake AWS, offline, 0.4s)        ← fast inner loop
+   pytest  (unit: moto fake AWS, offline, 0.4s)         ← fast inner loop
         │
         ▼
-   git commit  ──► auto-SIGNED (ssh key ~/.ssh/github_signing)
+   git commit ──► auto-SIGNED (ssh key ~/.ssh/github_signing)
         │
         ▼
-   git push ──────────────────► GitHub (public monorepo)
-                                   │
-                                   ▼
-                          ruleset: required_signatures
-                          unsigned? ──► REJECTED at the door
-                                   │ signed ✓
-                                   ▼
-                              main branch
-                                   ┊
-                                   ┊  (step 14-15 will automate this leg:
-                                   ┊   Actions → pytest gate → deploy → smoke)
-        ┌──────────────────────────┴───── for now, deploys run from the laptop:
-        │
-        ├── backend/infra changes ──► terraform plan  (read the diff!)
-        │                             terraform apply
-        │                                │  state: s3://abhijitraj-crc-tfstate
-        │                                ▼
-        │                  Lambda · API GW · DynamoDB · IAM · alarms (ap-south-1)
-        │
-        └── website/ changes ──► aws s3 sync + CloudFront invalidation
-                                         │
-                                         ▼
-                              S3 (private) ◄─OAC─ CloudFront ◄─ visitors
-                                                      https://abhijitraj.me
-        after either deploy:
-   pytest -m smoke  ──► live checks (API increments, DB persisted, CORS, 404s)
+   git push (branch) ───────────► GitHub (public monorepo)
+                                     │
+                                     ▼
+                               pull request ──► tests.yml: `unit` (always runs)
+                                     │
+                          ruleset gate on main:
+                            · commits signed?        ─┐ any "no"
+                            · came via a PR?          ├──► merge BLOCKED
+                            · `unit` check green?    ─┘
+                                     │ all ✓ → squash-merge
+                                     ▼
+                                main branch
+                                     │
+            ┌── what changed? ───────┴──────────────┐  (path filters)
+            │ backend/** or infra/**                │ website/**
+            ▼                                       ▼
+    backend.yml  (GitHub Actions)           frontend.yml  (GitHub Actions)
+    ┌─────────────────────────────┐         ┌──────────────────────────────┐
+    │ 1 test    pytest (unit)     │         │ OIDC ──► temp AWS creds (1h) │
+    │     ▼ needs: test           │         │   aws s3 sync --delete       │
+    │ 2 deploy  OIDC ─► AWS role  │         │   cloudfront invalidation    │
+    │           terraform apply   │         │   curl -f https://… → 200    │
+    │     ▼ needs: deploy         │         └──────────────┬───────────────┘
+    │ 3 smoke   pytest -m smoke   │                        │
+    └──────────┬──────────────────┘                        ▼
+               │  state: s3://abhijitraj-crc-tfstate   S3 (private)
+               ▼                                           ▲ OAC
+    Lambda · API GW · DynamoDB ·                       CloudFront ◄── visitors
+    IAM · SNS · alarms (ap-south-1)                    https://abhijitraj.me
+
+    auth everywhere: NO stored AWS keys — GitHub mints a signed JWT, AWS
+    verifies it and lends role cloud-resume-github-actions (pinned to this
+    repo + main) for ~1 hour. Only non-OIDC secret: PAGERDUTY_ENDPOINT.
 ```
 
-Reading the diagram: signing + the ruleset guard WHAT enters main; tests guard
-WHETHER it works (unit before commit, smoke after deploy); Terraform guards
-HOW infra changes (plan before apply). Step 14-15 moves the dashed leg into
-GitHub Actions so push = test + deploy + verify, with OIDC instead of keys.
+Reading the diagram: signing + PR + required check guard WHAT enters main;
+tests guard WHETHER it works (unit before merge, smoke after deploy);
+Terraform guards HOW infra changes (plan = reviewable diff). The laptop's
+only job now is writing code and opening PRs — merge to main IS the deploy.
