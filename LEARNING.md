@@ -4,6 +4,35 @@ A running record of concepts learned, with explanations in plain language.
 
 ---
 
+## Contents
+
+- [Session 1 — 2026-06-08](#session-1--2026-06-08) — static site live over HTTPS on a custom domain
+  (S3 · CloudFront/OAC · ACM · Cloudflare DNS · IAM/CLI basics · budgets)
+- [Session 2 — 2026-06-09](#session-2--2026-06-09) — serverless visitor counter + alerting
+  (DynamoDB · Lambda · API Gateway · CORS · CloudWatch→SNS→PagerDuty)
+- [Session 3 — 2026-06-10](#session-3--2026-06-10) — security audit, Slack alerts, tests, IaC
+  (Access Analyzer · policy validation · PagerDuty→Slack · pytest/moto ·
+   smoke tests · throttling · Git/GitHub · Terraform)
+
+### Concepts index (for review)
+
+| Topic | Where |
+|---|---|
+| IAM: users/MFA/keys · least privilege · Access Analyzer | S1 · S2 · S3 |
+| S3: hosting, bucket policies, Block Public Access | S1 |
+| CloudFront, OAC, TLS/ACM, cache invalidation | S1 · S2 (deploy) |
+| DNS: registrar, CNAME flattening, proxied vs DNS-only | S1 |
+| DynamoDB: items, partition key, on-demand, atomic ADD, Decimal | S2 · S3 (tests) |
+| Lambda: handler/event/context, exec role, packaging | S2 · S3 (Terraform) |
+| API Gateway: routes, AWS_PROXY, stages, throttling | S2 · S3 |
+| CORS: preflight, gateway vs Lambda duties | S2 · S3 (smoke) |
+| Monitoring: CloudWatch alarms, SNS, PagerDuty, Slack | S2 · S3 |
+| Testing: pytest, fixtures/markers, moto, smoke vs unit | S3 |
+| Git/GitHub: monorepo, secrets vs identifiers | S3 |
+| Terraform: state, plan/apply, drift, import, variables | S3 |
+
+---
+
 ## Session 1 — 2026-06-08
 
 **What we built:** a résumé website, live and global over HTTPS on a custom
@@ -495,3 +524,64 @@ Concepts:
 - **First-invocation edge case** stays in the unit layer (recreating it live
   would mean deleting the prod item). A disposable staging stack (step 12 IaC)
   is where destructive smoke tests belong.
+
+### Step 11 — Unit tests (same session)
+
+- **pytest** — Python's standard test runner: files `test_*.py`, plain `assert`,
+  **fixtures** (reusable setup injected by parameter name), **markers** (labels).
+- **moto** — fakes AWS in-process; boto3 calls never leave the machine. Tests
+  run with no creds, no cost, no network.
+- **Import-order gotcha** — our Lambda creates `boto3.resource()` at module
+  import time, so the mock must start *before* import; fixture does
+  `importlib.reload`. (Testability cost of module-level clients.)
+- **Decimal trap** — DynamoDB numbers come back as `decimal.Decimal`;
+  `json.dumps(Decimal)` raises TypeError → handler needs `int(...)`. Assert the
+  *type*, not just equality (Decimal(8) == 8 is True!).
+- 5 tests: contract (200/CORS/JSON) · increment 41→42 · persistence 1→2→3 ·
+  missing-item upsert → 1 · Decimal→int.
+
+### API throttling (same session)
+
+- HTTP API **stage-level throttling**: `rate` (steady req/s) + `burst` (spike
+  allowance), token-bucket. Excess → **429** at the gateway, Lambda never
+  invoked → $0. Ours: 5 rps / burst 10.
+- Guards against **denial-of-wallet** (bot loop burning paid invocations), not
+  per-IP abuse (that's WAF, ~$5/mo, skipped).
+- Trade-off accepted: a capped flood makes the counter 429 for real visitors,
+  but the résumé itself (CloudFront/S3) is unaffected.
+
+### Step 13 — Git/GitHub (same session)
+
+- Public **monorepo** (website/ + backend/ + infra/ + docs) over two repos:
+  CI path-filters give separate pipelines anyway; one history.
+- **Secrets vs identifiers**: keys/tokens NEVER in git (history is forever) →
+  GitHub Secrets or OIDC (step 14). Account IDs, API IDs, bucket names are
+  *identifiers* — fine in public (our API URL is already in counter.js).
+- Commit email = GitHub **noreply** address; `gh auth setup-git` wires git
+  pushes through the gh CLI's token.
+
+### Step 12 — Terraform (IaC)
+
+- **Declarative**: .tf files say what should EXIST; `terraform` makes reality
+  match. Repo = source of truth; AWS = a rendering of it.
+- **Workflow**: `init` (download providers, connect backend) → `plan` (3-way
+  diff: config vs state vs refreshed reality — read it EVERY time) → `apply`.
+  Re-running is always safe (convergence) — the crash-recovery story too.
+- **State** (`terraform.tfstate`): maps config names → real AWS IDs. Ours is
+  remote: `s3://abhijitraj-crc-tfstate` (versioned, private, lockfile). State
+  bucket ≠ website bucket on purpose: CDN exposure, CI `sync --delete` would
+  eat it, and TF must not manage the bucket holding its own state.
+- **Drift**: manual change to a managed attr → next plan reverts it (config
+  wins). Manual delete → plan recreates. Manual NEW resource → invisible.
+- **Adoption via `import` blocks**: describe resource + point at real ID →
+  plan shows "N to import" → iterate until ALSO "0 to change" → apply. All 15
+  backend resources adopted with zero recreation (smoke tests confirmed).
+  (Bulk alternative: `terraform plan -generate-config-out`.)
+- **References** (`aws_dynamodb_table.visitors.arn`) replace pasted ARNs —
+  Terraform derives the dependency graph and order.
+- **Variables/outputs**: `var.pagerduty_endpoint` (sensitive) keeps the PD key
+  out of the public repo via gitignored `terraform.tfvars`; `output
+  api_endpoint` exposes the URL to humans/CI.
+- **HCL** = HashiCorp Configuration Language. Registry docs are the reference
+  (nobody memorizes arguments); `fmt`/`validate` keep it honest. Licensing:
+  BUSL since 2023 (OpenTofu = OSS fork). CLI free; resources billed as normal.
