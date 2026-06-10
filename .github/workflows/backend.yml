@@ -1,4 +1,4 @@
-# Backend pipeline (CRC steps 14): test -> deploy -> verify.
+# Backend pipeline (CRC steps 14-15): test -> deploy -> verify.
 # Auth is OIDC — no AWS keys stored in GitHub (see infra/github-oidc.tf).
 
 name: backend
@@ -18,19 +18,66 @@ permissions:
   id-token: write
   contents: read
 
+# Two pushes in quick succession must not run terraform apply at the same
+# time; the second run queues behind the first.
+concurrency:
+  group: backend-deploy
+  cancel-in-progress: false
+
 jobs:
-  deploy:
+  # Gate: unit tests (moto-mocked, no AWS access needed — note: no OIDC here).
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements-dev.txt
+        working-directory: backend
+      # pytest.ini's `-m "not smoke"` keeps this to unit tests only.
+      - run: python -m pytest tests/ -v
+        working-directory: backend
 
-      # The token exchange: mints the GitHub JWT, calls
-      # sts:AssumeRoleWithWebIdentity, exports temp credentials to the job.
+  # Deploy: terraform apply. Runs ONLY if tests passed (needs: test).
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Authenticate to AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::695331051459:role/cloud-resume-github-actions
           aws-region: ap-south-1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.5"
+      - run: terraform init -input=false
+        working-directory: infra
+      - run: terraform apply -auto-approve -input=false
+        working-directory: infra
+        env:
+          # Replaces the gitignored terraform.tfvars on CI. PagerDuty can't
+          # do OIDC, so its key lives in GitHub Secrets — the legit use.
+          TF_VAR_pagerduty_endpoint: ${{ secrets.PAGERDUTY_ENDPOINT }}
 
-      - name: Who am I? (proves the handshake worked)
-        run: aws sts get-caller-identity
+  # Verify: live smoke tests against the deployed stack (real API + DynamoDB
+  # cross-check, so this job needs AWS credentials too).
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate to AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::695331051459:role/cloud-resume-github-actions
+          aws-region: ap-south-1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements-dev.txt
+        working-directory: backend
+      - run: python -m pytest -m smoke -v
+        working-directory: backend
