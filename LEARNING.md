@@ -600,3 +600,8 @@ Concepts:
 - Key: `~/.ssh/github_signing` (ed25519, no passphrase — relies on disk
   encryption; backup in 1Password), public half registered on GitHub as a
   *signing key*.
+- **Enforcement**: a repository **ruleset** (`required_signatures` on the
+  default branch) makes GitHub reject any unsigned push — verified by pushing
+  an unsigned commit ("push declined due to repository rule violations").
+  Rulesets are the modern successor to classic branch protection; "status
+  checks" are a different rule type (CI results — coming in step 14).
