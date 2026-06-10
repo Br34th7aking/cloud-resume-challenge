@@ -100,9 +100,12 @@ IaC, CI/CD) are written directly.
 - Gotcha learned: module-level `boto3.resource()` must be imported *after* `mock_aws()` starts → fixture does `importlib.reload`
 - [x] **Smoke tests** (`backend/tests/smoke/test_deployed_stack.py`, `pytest -m smoke`) — 5 tests vs the LIVE stack: increment + persisted-to-DynamoDB cross-check, GET→404 (no side effect), unknown path→404 (no side effect), CORS preflight, garbage body→200 not 500. Marker-separated via `pytest.ini` (plain `pytest` = unit only). `SMOKE_API_URL` env var re-aims at staging later. Caveat: each run adds ~3 real views; increment assert can flake if a real visitor lands mid-test.
 
-### 12. Infrastructure as Code
-- [ ] Define the back end (DynamoDB + Lambda + API GW) as code (AWS SAM or Terraform)
-- [ ] `deploy` from the template instead of console
+### 12. Infrastructure as Code ✅ (backend)
+- [x] **Terraform** chosen over SAM (transferable skill; can manage whole stack later)
+- [x] Foundation: TF 1.15.5 (no-sudo, `~/bin/terraform`), remote state `s3://abhijitraj-crc-tfstate` (versioned, private, native lockfile), AWS provider ~>6, `infra/` in repo
+- [x] **All 15 backend resources imported** (import blocks, plan-verified "no changes"): DynamoDB table; Lambda + exec role + inline DynamoDB policy + logs policy/attachment (TF now owns code deploys via archive_file/source_code_hash); API GW api/integration/route/stage (throttling in code) + invoke permission; SNS topic + PagerDuty subscription + both CloudWatch alarms
+- [x] PagerDuty integration key kept out of the public repo: `var.pagerduty_endpoint` (sensitive) + gitignored `terraform.tfvars`
+- [ ] Deferred: CloudFront/S3/ACM/Cloudflare adoption (stable; ACM needs us-east-1 provider alias — later lesson)
 
 ### 13. Source control — GitHub (back end) ✅
 - [x] Public **monorepo** (frontend + backend + docs): https://github.com/Br34th7aking/cloud-resume-challenge — initial commit `392fe79` (steps 1–11). CI in steps 14–15 will use path filters.
@@ -154,4 +157,4 @@ New domain — build & deploy an ML feature. Detail later.
 
 ---
 
-*Last updated: 2026-06-10 (later) — Steps 1–11 + 13 DONE. Added: smoke tests (pytest -m smoke vs live stack), API throttling (5 rps/burst 10, free), public GitHub monorepo. **NEXT: Step 12 — IaC (Terraform vs SAM decision pending).** Then 14–15 CI/CD, 16 blog.*
+*Last updated: 2026-06-10 (later) — Steps 1–11 + 13 DONE. Added: smoke tests (pytest -m smoke vs live stack), API throttling (5 rps/burst 10, free), public GitHub monorepo. **NEXT: Steps 14–15 — CI/CD (GitHub Actions; OIDC to AWS, pytest gate, terraform apply, s3 sync + invalidation).** Then 16 blog.*

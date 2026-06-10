@@ -18,3 +18,6 @@ __pycache__/
 *.tfstate.*
 errored.tfstate
 infra/build/
+
+# Terraform variable values (may contain secrets)
+*.tfvars
