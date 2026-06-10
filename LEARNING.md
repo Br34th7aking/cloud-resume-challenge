@@ -585,3 +585,18 @@ Concepts:
 - **HCL** = HashiCorp Configuration Language. Registry docs are the reference
   (nobody memorizes arguments); `fmt`/`validate` keep it honest. Licensing:
   BUSL since 2023 (OpenTofu = OSS fork). CLI free; resources billed as normal.
+
+#### Commit signing (SSH)
+
+- Git authorship is **self-asserted** (`user.email` is just config) — anyone can
+  impersonate anyone in commit metadata. Signing makes authorship *provable*.
+- History is tamper-evident (hash chain) but not author-authenticated — signing
+  adds the second property. GitHub shows verified signatures as **"Verified"**.
+- **SSH signing** (git ≥2.34) over GPG: two config lines (`gpg.format ssh`,
+  `user.signingkey`), no GPG toolchain; GPG only needed when signing beyond git
+  (email, packages). `commit.gpgsign true` = sign by default.
+- Adoption: optional in most teams, required in supply-chain-serious orgs
+  (post-SolarWinds/xz; SLSA); branch protection can enforce it.
+- Key: `~/.ssh/github_signing` (ed25519, no passphrase — relies on disk
+  encryption; backup in 1Password), public half registered on GitHub as a
+  *signing key*.
