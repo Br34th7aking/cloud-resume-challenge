@@ -1,0 +1,36 @@
+# Backend pipeline (CRC steps 14): test -> deploy -> verify.
+# Auth is OIDC — no AWS keys stored in GitHub (see infra/github-oidc.tf).
+
+name: backend
+
+on:
+  push:
+    branches: [main]
+    # Monorepo: only run when backend code, infra, or this file changes.
+    paths:
+      - "backend/**"
+      - "infra/**"
+      - ".github/workflows/backend.yml"
+
+# What the workflow's GitHub token may do. id-token:write is the OIDC
+# switch — permission to mint the signed identity token we trade to AWS.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The token exchange: mints the GitHub JWT, calls
+      # sts:AssumeRoleWithWebIdentity, exports temp credentials to the job.
+      - name: Authenticate to AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::695331051459:role/cloud-resume-github-actions
+          aws-region: ap-south-1
+
+      - name: Who am I? (proves the handshake worked)
+        run: aws sts get-caller-identity
