@@ -38,6 +38,7 @@ IaC, CI/CD) are written directly.
 - [x] **PagerDuty → Slack** (2026-06-10): PagerDuty Slack extension connected to workspace `realsemedtech.slack.com`; connection "Cloud Resume API" → `#aws-alerts` (Responder, all events, any urgency). Tested end-to-end via `aws cloudwatch set-alarm-state` → incident card in Slack + threaded auto-resolve. Free on PagerDuty Free plan + free Slack.
 - [x] **IAM Access Analyzer** (2026-06-10): free external-access analyzer `realsem-external-access-analyzer` (ap-south-1, org zone of trust ≡ account — org has only this account). Policy validation: `aws accessanalyzer validate-policy` → both saved policies clean. Paid analyzers (internal/unused) deliberately skipped.
 - [x] Git repo + push to personal GitHub — public monorepo https://github.com/Br34th7aking/cloud-resume-challenge (git identity = noreply email)
+- [x] **Commit signing** (2026-06-10): SSH signing key `~/.ssh/github_signing` (ed25519; backup in 1Password Personal vault), git auto-signs all commits/tags, public key registered on GitHub → "Verified" badge. Repo **ruleset `require-signed-commits`** (required_signatures on default branch, no bypass) — tested: unsigned push rejected. Status checks (CI green required) get added to the ruleset in step 14.
 - [ ] **AWS Cloud Practitioner certification** *(your own study + exam)*
 
 ---
