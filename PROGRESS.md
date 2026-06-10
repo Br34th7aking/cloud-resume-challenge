@@ -111,11 +111,16 @@ IaC, CI/CD) are written directly.
 ### 13. Source control — GitHub (back end) ✅
 - [x] Public **monorepo** (frontend + backend + docs): https://github.com/Br34th7aking/cloud-resume-challenge — initial commit `392fe79` (steps 1–11). CI in steps 14–15 will use path filters.
 
-### 14. CI/CD — back end
-- [ ] GitHub Actions: run tests + deploy SAM/Terraform on push
+### 14. CI/CD — back end ✅
+- [x] **OIDC auth** (no stored AWS keys): `infra/github-oidc.tf` — IAM OIDC provider for `token.actions.githubusercontent.com` + role `cloud-resume-github-actions` (trust pinned to `repo:Br34th7aking/cloud-resume-challenge:ref:refs/heads/main`) + hand-scoped policy `cloud-resume-ci` (state bucket, stack resources, website bucket, CloudFront invalidation; CI can READ but not WRITE its own role — no self-escalation; `iam:PassRole` pinned to lambda.amazonaws.com). Access Analyzer clean.
+- [x] `.github/workflows/backend.yml` — on push to main touching `backend/**`/`infra/**`: **test** (unit, moto, no AWS creds) → **deploy** (`terraform apply`, PagerDuty key via GitHub secret `PAGERDUTY_ENDPOINT` as `TF_VAR_`) → **smoke** (live, OIDC). `concurrency` group serializes applies. First run green: 5 passed / 0 changed / 5 passed.
+- [x] `.github/workflows/tests.yml` — always-on `unit` job (every PR + main pushes; NOT path-filtered, else required check would hang docs-only PRs)
+- [x] Ruleset `require-signed-commits` extended: `pull_request` (PRs mandatory, 0 approvals — solo) + `required_status_checks` (`unit` must pass). **New flow: branch → PR → unit green → merge.** Direct pushes to main now rejected.
+- Gotcha: gh token needed `workflow` scope to push workflow files (device-flow refresh again).
 
-### 15. CI/CD — front end
-- [ ] GitHub Actions: on push, `s3 sync` + CloudFront cache invalidation
+### 15. CI/CD — front end ✅
+- [x] `.github/workflows/frontend.yml` — on push to main touching `website/**`: OIDC auth → `s3 sync --delete` → CloudFront invalidation (`E2N3X21KFIF3UP`, path `/*`) → `curl -f` live check. First run green in 13s, HTTP 200.
+- Note: CI `s3 sync` re-uploads everything (fresh checkout = new mtimes) — fine at 3 files.
 
 ### 16. Blog post
 - [ ] Write up what was built and learned
@@ -158,4 +163,4 @@ New domain — build & deploy an ML feature. Detail later.
 
 ---
 
-*Last updated: 2026-06-10 (later) — Steps 1–11 + 13 DONE. Added: smoke tests (pytest -m smoke vs live stack), API throttling (5 rps/burst 10, free), public GitHub monorepo. **NEXT: Steps 14–15 — CI/CD (GitHub Actions; OIDC to AWS, pytest gate, terraform apply, s3 sync + invalidation).** Then 16 blog.*
+*Last updated: 2026-06-10 (evening) — Steps 1–15 DONE. Added: full CI/CD (OIDC, three workflows, required status checks; repo flow is now branch → PR → merge). **NEXT: Step 16 — blog post.** Deferred: CloudFront/S3/ACM/Cloudflare into Terraform.*
