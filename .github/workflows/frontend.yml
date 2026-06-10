@@ -1,0 +1,46 @@
+# Frontend pipeline (CRC step 15): sync website/ to S3, purge the CDN cache.
+# Same OIDC role as backend.yml — its policy includes the website bucket
+# and the CloudFront distribution.
+
+name: frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/frontend.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: frontend-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::695331051459:role/cloud-resume-github-actions
+          aws-region: ap-south-1
+
+      # --delete: files removed from website/ are removed from the bucket
+      # too — the repo is the single source of truth. (And the reason the
+      # Terraform state bucket is a SEPARATE bucket.)
+      - name: Sync site to S3
+        run: aws s3 sync website/ s3://abhijitraj-resume-crc --delete
+
+      # CloudFront caches at the edge; without this, visitors keep getting
+      # the old site until TTLs expire.
+      - name: Invalidate CloudFront cache
+        run: aws cloudfront create-invalidation --distribution-id E2N3X21KFIF3UP --paths "/*"
+
+      - name: Verify site responds
+        run: curl -sSf -o /dev/null -w "HTTP %{http_code}\n" https://abhijitraj.me
