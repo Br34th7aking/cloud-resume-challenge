@@ -12,7 +12,7 @@ A running record of concepts learned, with explanations in plain language.
   (DynamoDB · Lambda · API Gateway · CORS · CloudWatch→SNS→PagerDuty)
 - [Session 3 — 2026-06-10](#session-3--2026-06-10) — security audit, Slack alerts, tests, IaC
   (Access Analyzer · policy validation · PagerDuty→Slack · pytest/moto ·
-   smoke tests · throttling · Git/GitHub · Terraform)
+   smoke tests · throttling · Git/GitHub · Terraform · commit signing)
 
 ### Concepts index (for review)
 
@@ -30,6 +30,7 @@ A running record of concepts learned, with explanations in plain language.
 | Testing: pytest, fixtures/markers, moto, smoke vs unit | S3 |
 | Git/GitHub: monorepo, secrets vs identifiers | S3 |
 | Terraform: state, plan/apply, drift, import, variables | S3 |
+| Commit signing: SSH keys, Verified badge, rulesets | S3 |
 
 ---
 
@@ -605,3 +606,50 @@ Concepts:
   an unsigned commit ("push declined due to repository rule violations").
   Rulesets are the modern successor to classic branch protection; "status
   checks" are a different rule type (CI results — coming in step 14).
+
+### How code flows through the system (end of session 3)
+
+```
+ MacBook (dev)
+ ────────────
+   edit code: website/ · backend/ · infra/
+        │
+        ▼
+   pytest  (unit: moto fake AWS, offline, 0.4s)        ← fast inner loop
+        │
+        ▼
+   git commit  ──► auto-SIGNED (ssh key ~/.ssh/github_signing)
+        │
+        ▼
+   git push ──────────────────► GitHub (public monorepo)
+                                   │
+                                   ▼
+                          ruleset: required_signatures
+                          unsigned? ──► REJECTED at the door
+                                   │ signed ✓
+                                   ▼
+                              main branch
+                                   ┊
+                                   ┊  (step 14-15 will automate this leg:
+                                   ┊   Actions → pytest gate → deploy → smoke)
+        ┌──────────────────────────┴───── for now, deploys run from the laptop:
+        │
+        ├── backend/infra changes ──► terraform plan  (read the diff!)
+        │                             terraform apply
+        │                                │  state: s3://abhijitraj-crc-tfstate
+        │                                ▼
+        │                  Lambda · API GW · DynamoDB · IAM · alarms (ap-south-1)
+        │
+        └── website/ changes ──► aws s3 sync + CloudFront invalidation
+                                         │
+                                         ▼
+                              S3 (private) ◄─OAC─ CloudFront ◄─ visitors
+                                                      https://abhijitraj.me
+        after either deploy:
+   pytest -m smoke  ──► live checks (API increments, DB persisted, CORS, 404s)
+```
+
+Reading the diagram: signing + the ruleset guard WHAT enters main; tests guard
+WHETHER it works (unit before commit, smoke after deploy); Terraform guards
+HOW infra changes (plan before apply). Step 14-15 moves the dashed leg into
+GitHub Actions so push = test + deploy + verify, with OIDC instead of keys.
