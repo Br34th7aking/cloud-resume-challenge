@@ -11,3 +11,10 @@ __pycache__/
 *.pem
 *.csv
 .env
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+errored.tfstate
+infra/build/
